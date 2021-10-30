@@ -77,12 +77,12 @@ public class GetImageFromGPU : MonoBehaviour
     {
         while (true)
         {
+            // GetRenderEventFunc gives unity OnRenderEvent()
+            // OnRenderEvent() runs UpdatecameraTextureGPU() using the preloaded m_device and texture ptr
             yield return new WaitForEndOfFrame();
             if (canRenderImages)
             {
                 GL.IssuePluginEvent(GetRenderEventFunc(), TrackerID);
-                // GetRenderEventFunc gives unity OnRenderEvent()
-                // OnRenderEvent() runs UpdatecameraTextureGPU() using the preloaded m_device and texture ptr
             }
         }
     }

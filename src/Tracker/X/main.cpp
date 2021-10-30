@@ -92,7 +92,13 @@ extern "C" {
 
     DLL_EXPORT void InitializeXCameraFeed(int Id) {
         Debug::Log("Initializing XSlam Camera Feed");
-        to[Id]->StartXVisioCameraFeed(); 
+        to[Id]->StartXCameraFeed(); 
+        Debug::Log("Done Initializing XSlam Camera Feed");
+    }
+
+    DLL_EXPORT void InitializeXSLAM(int Id) {
+        Debug::Log("Initializing XSlam Camera Feed");
+        to[Id]->StartXSLAM();
         Debug::Log("Done Initializing XSlam Camera Feed");
     }
 
@@ -164,6 +170,10 @@ extern "C" {
     DLL_EXPORT double* GetLatestTimestampPose(int iD) { 
         if (to.find(iD) == to.end()) { return nullptr; }
         return to[iD]->GetLatestTimestampPose();
+    }
+
+    DLL_EXPORT void CopyLatestTimestampPose(int iD, double* poseVector) {
+        memcpy(poseVector, to[iD]->GetLatestTimestampPose(), 7 * sizeof(double));
     }
 
     DLL_EXPORT void SetFilterEnabledExt(int iD, bool slam, bool velocity, bool accel, bool angvelocity, bool angaccel) {
@@ -288,6 +298,8 @@ extern "C" {
         if (to.find(iD) == to.end()) { return; }
         to[iD]->SetLeftRightEyeTransforms(leftEyeTransform, rightEyeTransform);
     }
+
+
 }            
    
 static void UNITY_INTERFACE_API OnRenderEvent(int iD)
