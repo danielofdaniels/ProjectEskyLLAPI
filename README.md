@@ -1,7 +1,7 @@
 # Project Esky Low Level Application Programming Interface (LLAPI)
 
-Forked for development of Xvisio camera integration\
-Requires the XSLAM SDK
+Forked for development of x sensor integration\
+Requires the addtional SDK for the sensor
 
 
 
