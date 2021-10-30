@@ -40,9 +40,38 @@
 #include <DollaryDooFilter.h>
 #include <KalmanFilter.h>
 #define PI 3.141592653
+
+#include <xslam/xslam_sdk.hpp>
+
+// Interpret the xslam image data into an cv::Mat with the BGRA channels for Unity
+// This should probably be scoped into a class?
+cv::Mat rgbImage(xslam_rgb* rgb)
+{
+    cv::Mat out;
+    switch (rgb->codec) {
+    case xslam_rgb_codec::YUYV: {
+        cv::Mat img(rgb->height, rgb->width, CV_8UC2, rgb->data);
+        cv::cvtColor(img, out, cv::COLOR_YUV2BGRA_YUYV);
+        break;
+    }
+    case xslam_rgb_codec::YUV420p: {
+        cv::Mat img(static_cast<int>(1.5 * rgb->height), rgb->width, CV_8UC1, rgb->data);
+        cv::cvtColor(img, out, cv::COLOR_YUV420p2BGRA);
+        break;
+    }
+    case xslam_rgb_codec::JPEG: {
+        cv::Mat img(rgb->height, rgb->width, CV_8UC3, rgb->data);
+        out = cv::imdecode(img, cv::IMREAD_COLOR);
+        // There must be a smarter way to add the alpha channel
+        cv::cvtColor(out, out, cv::COLOR_BGR2BGRA);
+        break;
+    }
+    }
+    return out;
+}
+
 typedef void(*FuncReceiveCameraImageCallbackWithID)(int instanceID, unsigned char* info,
     int lengthofarray, int width, int height, int pixelCount);
-
 
 typedef void(*LocalizationCallback)(int trackerID, int LocalizationDelegate);
 typedef void(*MapDataCallback)(int trackerID);
@@ -154,6 +183,7 @@ public:
 
     glm::mat4 DeltaLeftEye, DeltaRightEye;
 
+    cv::Mat im_xvisio_mat;
     cv::Mat fisheye_mat;
     cv::Mat fisheye_mat_color;
     cv::Mat fisheye_mat_color_undistort;
@@ -663,20 +693,21 @@ public:
 
 #else 
 
-/*        if (!LockImage) {
+        if (!LockImage) {
             if (m_Device != nullptr) {
                 if (hasReceivedTexture) {
                     ID3D11DeviceContext* ctx = NULL;
                     m_Device->GetImmediateContext(&ctx);
                     if (ctx != nullptr) {
                         if (d3dtex != nullptr) {
-                            ctx->UpdateSubresource(d3dtex, 0, 0, fisheye_mat_color_undistort.data, fisheye_mat_color_undistort.step[0], (UINT)fisheye_mat_color_undistort.total());
+                            //ctx->UpdateSubresource(d3dtex, 0, 0, fisheye_mat_color_undistort.data, fisheye_mat_color_undistort.step[0], (UINT)fisheye_mat_color_undistort.total());
+                            ctx->UpdateSubresource(d3dtex, 0, 0, im_xvisio_mat.data, im_xvisio_mat.step[0], (UINT)im_xvisio_mat.total());
                         }
                         ctx->Release();
                     }
                 }
             }
-        }*/
+        }
 #endif
     }
     void StopTracking() {
@@ -726,6 +757,22 @@ public:
         this->rightEyeTransform = transpose(this->rightEyeTransform);
         this->leftEyeTransform = transpose(this->leftEyeTransform);
         Debug::Log("Finished setting transforms", Color::Green);
+    }
+
+    // Background subscriber for the xslam camera, runs whenever a new frame is delivered
+    void WriteRGBFrameToGPU(xslam_rgb* rgb)
+    {
+        LockImage = true;
+        im_xvisio_mat = rgbImage(rgb);
+        LockImage = false;
+    }
+
+    // Bind the class function to this instance and start the callback
+    void StartXVisioCameraFeed()
+    {
+        std::function<void(xslam_rgb*)> fp = std::bind(&TrackerObject::WriteRGBFrameToGPU, this, std::placeholders::_1);
+        xslam_rgb_callback(fp);
+        xslam_start_camera();
     }
 
 };

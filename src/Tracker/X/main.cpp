@@ -22,6 +22,7 @@
 #include <d3d11.h>   
 #define STB_IMAGE_IMPLEMENTATION
 #endif  
+
 //-------------------------------------------------------------------
 #ifdef __linux__   
 #define DLL_EXPORT    
@@ -88,6 +89,13 @@ extern "C" {
         to[Id]->TrackerID = Id; 
         Debug::Log("Done Initializing Tracker Object");
     }
+
+    DLL_EXPORT void InitializeXCameraFeed(int Id) {
+        Debug::Log("Initializing XSlam Camera Feed");
+        to[Id]->StartXVisioCameraFeed(); 
+        Debug::Log("Done Initializing XSlam Camera Feed");
+    }
+
     DLL_EXPORT void ObtainMap(int Id) { 
         if (to.find(Id) == to.end()) { return; } 
         if (to.count(Id)) { 
@@ -145,6 +153,7 @@ extern "C" {
             if (d3d != nullptr) {  
                 m_Device = d3d->GetDevice();
             } 
+
 #endif          
         }             
         else if (eventType == kUnityGfxDeviceEventShutdown) {   
