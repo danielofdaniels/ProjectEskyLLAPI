@@ -700,7 +700,6 @@ public:
                     m_Device->GetImmediateContext(&ctx);
                     if (ctx != nullptr) {
                         if (d3dtex != nullptr) {
-                            //ctx->UpdateSubresource(d3dtex, 0, 0, fisheye_mat_color_undistort.data, fisheye_mat_color_undistort.step[0], (UINT)fisheye_mat_color_undistort.total());
                             ctx->UpdateSubresource(d3dtex, 0, 0, im_xvisio_mat.data, im_xvisio_mat.step[0], (UINT)im_xvisio_mat.total());
                         }
                         ctx->Release();
@@ -766,13 +765,39 @@ public:
         im_xvisio_mat = rgbImage(rgb);
         LockImage = false;
     }
-
     // Bind the class function to this instance and start the callback
-    void StartXVisioCameraFeed()
+    void StartXCameraFeed()
     {
         std::function<void(xslam_rgb*)> fp = std::bind(&TrackerObject::WriteRGBFrameToGPU, this, std::placeholders::_1);
         xslam_rgb_callback(fp);
         xslam_start_camera();
+    }
+
+
+
+
+
+
+    void RecordPose(xslam_pose* pose)
+    {
+        // TODO Check if the expected format, I feel it's not.
+        latestPoseExternal[0] = pose->x;
+        latestPoseExternal[1] = pose->y;
+        latestPoseExternal[2] = pose->z;
+        
+        latestPoseExternal[3] = pose->pitch;
+        latestPoseExternal[4] = pose->yaw;
+        latestPoseExternal[5] = pose->roll;
+    }
+
+    // Build map and localise simultaniously
+    void StartXSLAM()
+    {
+        std::function<void(xslam_pose*)> fp = std::bind(&TrackerObject::RecordPose, this, std::placeholders::_1);
+        xslam_6dof_callback(fp);
+        xslam_start_vo();
+
+        // TODO: Handle Stoping SLAM, Loop closure, save map, from xslam, free the cam
     }
 
 };
