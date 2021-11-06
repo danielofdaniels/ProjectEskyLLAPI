@@ -42,6 +42,8 @@
 #define PI 3.141592653
 
 #include <xslam/xslam_sdk.hpp>
+#include <xslam/xslam_io.hpp>
+#include <xslam/xslam_geometry.hpp>
 
 // Interpret the xslam image data into an cv::Mat with the BGRA channels for Unity
 // This should probably be scoped into a class?
@@ -51,19 +53,19 @@ cv::Mat rgbImage(xslam_rgb* rgb)
     switch (rgb->codec) {
     case xslam_rgb_codec::YUYV: {
         cv::Mat img(rgb->height, rgb->width, CV_8UC2, rgb->data);
-        cv::cvtColor(img, out, cv::COLOR_YUV2BGRA_YUYV);
+        cv::cvtColor(img, out, cv::COLOR_YUV2RGBA_YUYV);
         break;
     }
     case xslam_rgb_codec::YUV420p: {
         cv::Mat img(static_cast<int>(1.5 * rgb->height), rgb->width, CV_8UC1, rgb->data);
-        cv::cvtColor(img, out, cv::COLOR_YUV420p2BGRA);
+        cv::cvtColor(img, out, cv::COLOR_YUV420p2RGBA);
         break;
     }
     case xslam_rgb_codec::JPEG: {
         cv::Mat img(rgb->height, rgb->width, CV_8UC3, rgb->data);
         out = cv::imdecode(img, cv::IMREAD_COLOR);
         // There must be a smarter way to add the alpha channel
-        cv::cvtColor(out, out, cv::COLOR_BGR2BGRA);
+        cv::cvtColor(out, out, cv::COLOR_BGR2RGBA);
         break;
     }
     }
@@ -172,7 +174,7 @@ public:
 
     double lastPoseTimeStamp = 0;
 
-
+    RGBCalibration rgb_calibration;
     float* deltaPoseLeftArray = new float[16]{ 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
     float* deltaPoseRightArray = new float[16]{ 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
     float fx, fy, cx, cy, d1, d2, d3, d4, d5 = 0;
@@ -369,6 +371,10 @@ public:
     }
     void show_pose_quaternion(xslam_pose_quaternion* pose)
     {
+        ostringstream oss2;
+        oss2 << "Attempting to update pose" << std::endl;
+        Debug::Log(oss2.str(), Color::Green);
+        
         latestPoseExternal[0] = pose->x[0];
         latestPoseExternal[1] = pose->x[1];
         latestPoseExternal[2] = pose->x[2];
@@ -376,6 +382,7 @@ public:
         latestPoseExternal[4] = pose->quaternion[1];
         latestPoseExternal[5] = pose->quaternion[2];
         latestPoseExternal[6] = pose->quaternion[3];
+        try {
         if (resetInitialPose) {
             //                    Debug::Log("Reset the initial pose", Color::Green);
             resetInitialPose = false;
@@ -388,7 +395,7 @@ public:
         PoseFinal[3][0] = latestPoseExternal[1];
         PoseFinal[3][1] = -latestPoseExternal[0];
         PoseFinal[3][2] = -latestPoseExternal[2];
-        try {
+
             DeltaLeftEye = glm::inverse(leftEyeTransform) * glm::inverse(PoseInitial) * PoseFinal * leftEyeTransform;
             DeltaRightEye = glm::inverse(rightEyeTransform) * glm::inverse(PoseInitial) * PoseFinal * rightEyeTransform;
             ConvMatrixToFloatArray(DeltaLeftEye, deltaPoseLeftArray);
@@ -399,13 +406,15 @@ public:
         }
         catch (std::exception e) {
             Debug::Log(e.what(), Color::Red);
+        
         }
-        /*        oss
+        ostringstream oss;
+                oss
                     << "[6DOF]: [" << std::setw(8) << pose->timestamp << std::setw(4) << " s],"
-                    << " p=(" << pose->x << " " << pose->y << " " << pose->z
-                    << " ), r=(" << pose->pitch << " " << pose->yaw << " " << pose->roll << " ), to origin(" << distance_to_origin << ")"
+                    << " p=(" << pose->x[0] << " " << pose->x[1] << " " << pose->x[2] << ","
+                    << " ), r=(" << pose->quaternion[0] << " " << pose->quaternion[1] << " " << pose->quaternion[2] << "," << pose->quaternion[3] << ")"
                     << ", Confidence= " << (int)pose->confidence << std::endl;
-                Debug::Log(oss.str());*/
+                Debug::Log(oss.str());
     }
 
 
@@ -468,6 +477,8 @@ public:
     void DoFunctionTracking() {
         double tempx, tempy, tempz = 0;
         double tempw = 1;
+
+
         while (!ExitThreadLoop) {
             try {
                 Debug::Log("Starting Thread", Color::Green);
@@ -521,32 +532,47 @@ public:
                 sparse_grid_config.occupied_if_proba_over = .5f;
                 sparse_grid_config.min_height = .01f;
                 sparse_grid_config.max_height = .2f;
+
+                /*
+                    Callback setup
+                */
                 Debug::Log("Setting up callbacks",Color::Green);
-                // function and configuration to get the 3D grid
-    //            xslam_sparse_grid3d_callback(&grid3d_callback, sparse_grid_config);
+                // Callback function and configuration to get the 3D grid
+                //xslam_sparse_grid3d_callback(&grid3d_callback, sparse_grid_config);
 
-                // function and configuration to get the 2D grid
-             //   xslam_sparse_grid2d_callback(&grid2d_callback, sparse_grid_config);
-
+                // Callback function and configuration to get the 2D grid
+                //xslam_sparse_grid2d_callback(&grid2d_callback, sparse_grid_config);
+                                
+                // Callback function for the IMU updates
+                xslam_imu_callback([&](xslam_imu* imu) { show_imu(imu); });
                 
+                // Callback function for the SLAM lost callback
+                xslam_lost_callback([&](float s) { lost(s); });
+                
+                // Callback function to call for each 6 dof pose update
+                xslam_6dof_quaternion_callback([&](xslam_pose_quaternion* p) { RecordPoseQuaternion(p); });
+                
+                // Callback function for each new RGB frame
+                xslam_rgb_callback([&](xslam_rgb* rgb) { WriteRGBFrameToMemory(rgb); });
 
-                // set the function to call for each 6 dof pose, the protopy must be "(void)(xslam_pose*)"
-                xslam_6dof_quaternion_callback([&](xslam_pose_quaternion* p) {
-                        show_pose_quaternion(p); 
-                    });
-                // set the IMU callback
-                xslam_imu_callback([&](xslam_imu* imu) {
-                    show_imu(imu);
-                    });
-                // set the lost callback
-                xslam_lost_callback([&](float s) {
-                    lost(s);
-                    });
-                Debug::Log("STARTING SENSOR");
-                // start visual odometry
-                xslam_status s = xslam_start_vo();
-                xslam_reset_slam();
-                if (s == xslam_status::success) { 
+                // Read in calibration on camera - examples put this before stream starts
+                Debug::Log("READING SENSOR CALIBRATION...");
+                xslam_status s = read_rgb_calibration(rgb_calibration, xslam_rgb_resolution::RGB_640x480);
+                if (s == xslam_status::success) {
+                    Debug::Log("Succeeded");
+                }
+                else {
+                    Debug::Log("Failed");
+                    Debug::Log(s);
+                }
+                
+                
+                Debug::Log("STARTING SENSOR...");
+                // xslam_start_vo() also covers xslam_start_camera(), both are not needed
+                s = xslam_start_vo();
+                //xslam_reset_slam(); // May only be for edge slam? Documentation suggests it does
+
+                if (s == xslam_status::success) {
                     Debug::Log("Succeeded");
                 }
                 else {
@@ -554,6 +580,11 @@ public:
                     Debug::Log(s);
                 }
 
+                // Set the camera resolution to a known value
+                //std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+                //xslam_set_rgb_resolution(xslam_rgb_resolution::RGB_640x480);
+                               
+                
                 // stop visual odometry
 
                 //Then let's initialize the sensor and begin tracking 
@@ -561,6 +592,7 @@ public:
                  //   bool hasPose = false;
                   //
                 //this loop handles the internal system, hoping the X has a callback function like the t261 does or things might get.... interesting
+                
                 shouldRestart = false;
                 Debug::Log("Entering Managment Loop", Color::Green);
                 while (!shouldRestart && !ExitThreadLoop) {
@@ -574,6 +606,7 @@ public:
         //                    }
 //                        }
                     }
+
                     //need to get callback saying we have images ready to go!
 
                     //Do we need to grab the current local map?
@@ -613,7 +646,7 @@ public:
                             oss << "Map save failed" << ex << std::endl;
                             Debug::Log(oss.str(), Color::Red);
                         }
-                        catch (...) {
+                        catch (...) {Debug::Log("Failed");
                             ostringstream oss;
                             oss << "Map save failed: Unknown" << std::endl;
                             Debug::Log(oss.str(), Color::Red);
@@ -626,6 +659,60 @@ public:
                         shouldRestart = true;
                     }
 
+
+                    try {
+                        if (!hasReceivedCameraStream) {
+                            //Again, if we haven't received a stream before, this will call a callback to initialize the preview stream within unity
+                            textureChannels = 4;
+                            if (textureInitializedCallback != nullptr) {
+                                if (!im_xvisio_mat.empty()) {
+                                    // Calibration Inputs
+                                    int w, h;
+                                    if (rgb_calibration.intrinsic.K[9] != im_xvisio_mat.cols)
+                                    {
+                                        cx = static_cast<int>(im_xvisio_mat.cols/2); 
+                                        cy = static_cast<int>(im_xvisio_mat.cols/2);
+                                        fx = 320; //TODO
+                                        fy = 320; //TODO
+                                        w = im_xvisio_mat.cols;
+                                        h = im_xvisio_mat.rows;
+                                    }
+                                    else
+                                    {
+                                        cx = rgb_calibration.intrinsic.K[2]; // u0
+                                        cy = rgb_calibration.intrinsic.K[3]; // v0
+                                        fx = rgb_calibration.intrinsic.K[0];
+                                        fy = rgb_calibration.intrinsic.K[1];
+                                        w = static_cast<int>(rgb_calibration.intrinsic.K[9]);
+                                        h = static_cast<int>(rgb_calibration.intrinsic.K[10]);
+                                        
+                                    }
+                                    intrinsicsL = (cv::Mat_<double>(3, 3) << fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0);
+                                    // Calibration Outputs
+                                    double fovX = 0.0, fovY = 0.0;
+                                    double focalLength = 0.0f;
+                                    double aspectRatio = 0;
+                                    cv::Point2d principalPoint;
+                                    
+                                    cv::calibrationMatrixValues(intrinsicsL, cv::Size(w, h), 0, 0, fovX, fovY, focalLength, principalPoint, aspectRatio);
+                                    // MISSING: d1-4
+                                    textureInitializedCallback(TrackerID, w, h, 4, fx, fy, cx, cy, fovX, fovY, focalLength, d1, d2, d3, d4, 1);
+
+                                    hasReceivedCameraStream = true;
+                                }
+                            }
+                            // Previous location of call, moved above
+                            //hasReceivedCameraStream = true;
+                        }
+                    }
+                    catch (...){
+                        ostringstream oss;
+                        oss << "Initialising Texture Failed" << std::endl;
+                        Debug::Log(oss.str(), Color::Red);
+                    }
+
+                    
+
                     if (ExitThreadLoop) {//if we should exit, exit the tracker loop first
                         shouldRestart = true;
                     }
@@ -633,8 +720,9 @@ public:
                 if (usesIntegrator) {
                 }
                 Debug::Log("Exiting Managment Loop, first stopping sensor",Color::Green);
+                xslam_clear_callbacks();                
                 xslam_stop();
-
+                
                 if (xslam_free() == xslam_status::failure ? EXIT_FAILURE : EXIT_SUCCESS) {
                     Debug::Log("FAILED TO STOP SENSOR");
                 }
@@ -655,7 +743,8 @@ public:
                 Debug::Log(ss.str(), Color::Red);
             }
         }
-        xslam_clear_callbacks();
+
+
         Debug::Log("Closed Tracker!", Color::Green);
     }
     void ResetInitialPose() {
@@ -758,29 +847,21 @@ public:
         Debug::Log("Finished setting transforms", Color::Green);
     }
 
+
     // Background subscriber for the xslam camera, runs whenever a new frame is delivered
-    void WriteRGBFrameToGPU(xslam_rgb* rgb)
+    void WriteRGBFrameToMemory(xslam_rgb* rgb)
     {
         LockImage = true;
         im_xvisio_mat = rgbImage(rgb);
+        //ostringstream oss;
+        //oss << "Wrote " << im_xvisio_mat.total() << " pixels back to GPU" << std::endl;
+        //Debug::Log(oss.str(), Color::Green);
         LockImage = false;
     }
-    // Bind the class function to this instance and start the callback
-    void StartXCameraFeed()
-    {
-        std::function<void(xslam_rgb*)> fp = std::bind(&TrackerObject::WriteRGBFrameToGPU, this, std::placeholders::_1);
-        xslam_rgb_callback(fp);
-        xslam_start_camera();
-    }
 
-
-
-
-
-
+    // Callback function for storing the pose -- Not ESKY approved 
     void RecordPose(xslam_pose* pose)
     {
-        // TODO Check if the expected format, I feel it's not.
         latestPoseExternal[0] = pose->x;
         latestPoseExternal[1] = pose->y;
         latestPoseExternal[2] = pose->z;
@@ -790,14 +871,89 @@ public:
         latestPoseExternal[5] = pose->roll;
     }
 
-    // Build map and localise simultaniously
-    void StartXSLAM()
+    // Callback for storing the pose, using quaternion
+    void RecordPoseQuaternion(xslam_pose_quaternion* pose)
     {
-        std::function<void(xslam_pose*)> fp = std::bind(&TrackerObject::RecordPose, this, std::placeholders::_1);
-        xslam_6dof_callback(fp);
+        /*
+        ostringstream oss2;
+        oss2 << "Attempting to update pose" << std::endl;
+        Debug::Log(oss2.str(), Color::Green);
+        */
+        latestPoseExternal[0] = pose->x[0];
+        latestPoseExternal[1] = pose->x[1];
+        latestPoseExternal[2] = pose->x[2];
+        latestPoseExternal[3] = pose->quaternion[0];
+        latestPoseExternal[4] = pose->quaternion[1];
+        latestPoseExternal[5] = pose->quaternion[2];
+        latestPoseExternal[6] = pose->quaternion[3];
+        /*
+        try {
+            if (resetInitialPose) {
+                //                    Debug::Log("Reset the initial pose", Color::Green);
+                resetInitialPose = false;
+                PoseInitial = glm::toMat4(glm::qua<float>(latestPoseExternal[6], -latestPoseExternal[4], latestPoseExternal[3], latestPoseExternal[5]));
+                PoseInitial[3][0] = latestPoseExternal[1];
+                PoseInitial[3][1] = -latestPoseExternal[0];
+                PoseInitial[3][2] = -latestPoseExternal[2];
+            }
+            PoseFinal = glm::toMat4(glm::qua<float>(latestPoseExternal[6], -latestPoseExternal[4], latestPoseExternal[3], latestPoseExternal[5]));
+            PoseFinal[3][0] = latestPoseExternal[1];
+            PoseFinal[3][1] = -latestPoseExternal[0];
+            PoseFinal[3][2] = -latestPoseExternal[2];
+
+            DeltaLeftEye = glm::inverse(leftEyeTransform) * glm::inverse(PoseInitial) * PoseFinal * leftEyeTransform;
+            DeltaRightEye = glm::inverse(rightEyeTransform) * glm::inverse(PoseInitial) * PoseFinal * rightEyeTransform;
+            ConvMatrixToFloatArray(DeltaLeftEye, deltaPoseLeftArray);
+            ConvMatrixToFloatArray(DeltaRightEye, deltaPoseRightArray);
+            if (callbackDeltaPoseUpdate != nullptr) {
+                callbackDeltaPoseUpdate(TrackerID, deltaPoseLeftArray, deltaPoseRightArray);
+            }
+        }
+        catch (std::exception e) {
+            Debug::Log(e.what(), Color::Red);
+
+        }
+        */
+        /*
+        ostringstream oss;
+        oss
+            << "[6DOF]: [" << std::setw(8) << pose->timestamp << std::setw(4) << " s],"
+            << " p=(" << pose->x[0] << " " << pose->x[1] << " " << pose->x[2] << ","
+            << " ), r=(" << pose->quaternion[0] << " " << pose->quaternion[1] << " " << pose->quaternion[2] << "," << pose->quaternion[3] << ")"
+            << ", Confidence= " << (int)pose->confidence << std::endl;
+        Debug::Log(oss.str());
+        */
+    }
+
+    /*
+        Redundant functions not used by ESKY
+    */
+    // Setup the callback and start SLAM
+    void StartXSLAM(bool quaternion = false)
+    {
+        
+        if (quaternion)
+        {
+            std::function<void(xslam_pose_quaternion*)> fp = std::bind(&TrackerObject::RecordPoseQuaternion, this, std::placeholders::_1);
+            xslam_6dof_quaternion_callback(fp);
+        }
+        else
+        {
+            std::function<void(xslam_pose*)> fp = std::bind(&TrackerObject::RecordPose, this, std::placeholders::_1);
+            xslam_6dof_callback(fp);
+        }
+        
         xslam_start_vo();
 
         // TODO: Handle Stoping SLAM, Loop closure, save map, from xslam, free the cam
+    }
+
+    // Setup the callback and start the RGB camera feed
+    void StartXCameraFeed()
+    {
+        std::function<void(xslam_rgb*)> fp = std::bind(&TrackerObject::WriteRGBFrameToMemory, this, std::placeholders::_1);
+        xslam_rgb_callback(fp);
+        xslam_start_camera();
     }
 
 };
