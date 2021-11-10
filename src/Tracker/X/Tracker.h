@@ -671,9 +671,9 @@ public:
                                     if (rgb_calibration.intrinsic.K[9] != im_xvisio_mat.cols)
                                     {
                                         cx = static_cast<int>(im_xvisio_mat.cols/2); 
-                                        cy = static_cast<int>(im_xvisio_mat.cols/2);
-                                        fx = 320; //TODO
-                                        fy = 320; //TODO
+                                        cy = static_cast<int>(im_xvisio_mat.rows/2);
+                                        fx = 700; //TODO
+                                        fy = 700; //TODO
                                         w = im_xvisio_mat.cols;
                                         h = im_xvisio_mat.rows;
                                     }
